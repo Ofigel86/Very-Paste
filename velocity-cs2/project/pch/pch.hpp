@@ -25,22 +25,36 @@
 
 // types
 #include <cstdint>
+#include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <cwchar>
 #include <string>
+#include <string_view>
 #include <cmath>
 #include <numbers>
 #include <format>
 #include <fstream>
+#include <filesystem>
 #include <functional>
 #include <chrono>
 #include <variant>
 #include <optional>
 #include <random>
+#include <type_traits>
+#include <utility>
+#include <limits>
+#include <new>
+#include <bit>
 
 // containers
 #include <array>
 #include <span>
 #include <vector>
 #include <deque>
+#include <map>
+#include <set>
+#include <queue>
 #include <unordered_set>
 #include <unordered_map>
 
@@ -56,6 +70,14 @@
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
+#include <condition_variable>
+#include <thread>
+
+// intrinsics
+#if defined( _MSC_VER )
+#include <intrin.h>
+#endif
+#include <immintrin.h>
 
 // dependencies
 #include <external/xdraw/xui/xui.hpp>

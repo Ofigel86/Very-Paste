@@ -46,6 +46,11 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <UpdateOffsetsOnBuild Condition="'$(UpdateOffsetsOnBuild)'==''">false</UpdateOffsetsOnBuild>
+    <Cs2DumperOutputDir Condition="'$(Cs2DumperOutputDir)'=='' and '$(CS2_DUMPER_OUTPUT)'!=''">$(CS2_DUMPER_OUTPUT)</Cs2DumperOutputDir>
+    <PythonExe Condition="'$(PythonExe)'==''">py -3</PythonExe>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Development|x64'">
     <OutDir>$(ProjectDir)..\bin\</OutDir>
     <IntDir>$(ProjectDir)..\bin\intermediates\</IntDir>
@@ -244,6 +249,7 @@
     <ClInclude Include="project\core\features\changer\changer.hpp" />
     <ClInclude Include="project\core\features\combat\combat.hpp" />
     <ClInclude Include="project\core\features\esp\esp.hpp" />
+    <ClInclude Include="project\core\features\esp\primitive_buffer.hpp" />
     <ClInclude Include="project\core\features\features.hpp" />
     <ClInclude Include="project\core\features\misc\misc.hpp" />
     <ClInclude Include="project\core\features\movement\movement.hpp" />
@@ -317,12 +323,14 @@
     <ClInclude Include="project\external\xorstr.hpp" />
     <ClInclude Include="project\external\zydis\zydis.h" />
     <ClInclude Include="project\pch\pch.hpp" />
+    <ClInclude Include="project\protection\cs2_dumper_offsets.hpp" />
     <ClInclude Include="project\protection\game_addresses.hpp" />
     <ClInclude Include="project\protection\patterns.hpp" />
     <ClInclude Include="project\utilities\addresses\addresses.hpp" />
     <ClInclude Include="project\utilities\addresses\interfaces.hpp" />
     <ClInclude Include="project\utilities\animation.hpp" />
     <ClInclude Include="project\utilities\cstypes.hpp" />
+    <ClInclude Include="project\utilities\diag.hpp" />
     <ClInclude Include="project\utilities\fnv1a.hpp" />
     <ClInclude Include="project\utilities\game_path.hpp" />
     <ClInclude Include="project\utilities\hooking\hooking.hpp" />
@@ -337,11 +345,17 @@
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />
+    <None Include="..\tools\update_offsets.py" />
     <None Include="project\external\inline-syscall\inline_syscall.inl" />
   </ItemGroup>
   <ItemGroup>
     <MASM Include="project\external\inline-syscall\syscall_impl.asm" />
   </ItemGroup>
+  <Target Name="UpdateCs2DumperOffsets" BeforeTargets="ClCompile" Condition="'$(UpdateOffsetsOnBuild)'=='true'">
+    <Error Condition="'$(Cs2DumperOutputDir)'==''" Text="Set Cs2DumperOutputDir or CS2_DUMPER_OUTPUT to a cs2_dumper output directory." />
+    <Message Importance="High" Text="Updating CS2 offsets from $(Cs2DumperOutputDir)" />
+    <Exec WorkingDirectory="$(ProjectDir).." Command="$(PythonExe) &quot;$(ProjectDir)..\tools\update_offsets.py&quot; --source-dir &quot;$(Cs2DumperOutputDir)&quot;" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />

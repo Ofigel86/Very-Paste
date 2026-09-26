@@ -1,6 +1,7 @@
 #include <pch/pch.hpp>
 #include "memory.hpp"
 #include <utilities/logging/logging.hpp>
+#include <protection/cs2_dumper_offsets.hpp>
 
 namespace memory {
 
@@ -115,6 +116,10 @@ namespace memory {
 				}
 
 				const auto high = hex_char_to_int (pattern [idx++]);
+				if (high < 0) {
+					result.byte_count = 0;
+					return result;
+				}
 
 				if (idx < pattern.length ()) {
 					const auto low = hex_char_to_int (pattern [idx]);
@@ -151,6 +156,27 @@ namespace memory {
 				.symbol = qualified.substr (colon + 1),
 				.has_module_prefix = true,
 			};
+		}
+
+		[[nodiscard]] static std::uintptr_t get_generated_interface(
+			std::uintptr_t module_base,
+			std::string_view module_name,
+			std::string_view interface_name )
+		{
+			const auto result = cs2_dumper::generated::interfaces::address(
+				module_base,
+				module_name,
+				interface_name );
+			if ( result )
+			{
+				logging::console::print(
+					xs( "[interfaces] using cs2-dumper fallback | {}:{} -> {:#x}" ),
+					module_name,
+					interface_name,
+					result );
+			}
+
+			return result;
 		}
 
 	} // namespace detail
@@ -230,6 +256,9 @@ namespace memory {
 
 			const auto create_interface = get_module_export_with_base (module_base, xs ("CreateInterface"));
 			if (!create_interface) {
+				if ( const auto generated = detail::get_generated_interface( module_base, qualified.module, lookup_name ) )
+					return generated;
+
 				logging::console::print (xs ("[error] CreateInterface not found | module: {}"), qualified.module);
 				return 0;
 			}
@@ -240,8 +269,16 @@ namespace memory {
 				interface_reg_t* next;
 			};
 
-			const auto interface_list_offset = *reinterpret_cast<std::int32_t*>(create_interface + 3);
-			const auto interface_regs = *reinterpret_cast<interface_reg_t**>(create_interface + 7 + interface_list_offset);
+			const auto interface_list_offset = safe_read<std::int32_t>( create_interface + 3 );
+			if ( !interface_list_offset ) {
+				if ( const auto generated = detail::get_generated_interface( module_base, qualified.module, lookup_name ) )
+					return generated;
+
+				logging::console::print (xs ("[error] CreateInterface thunk unreadable | module: {}"), qualified.module);
+				return 0;
+			}
+
+			const auto interface_regs = safe_read<interface_reg_t*>( create_interface + 7 + *interface_list_offset ).value_or( nullptr );
 
 			for (auto current = interface_regs; current; current = current->next) {
 				if (!current->name || !current->create_fn) {
@@ -252,6 +289,9 @@ namespace memory {
 					return current->create_fn ();
 				}
 			}
+
+			if ( const auto generated = detail::get_generated_interface( module_base, qualified.module, lookup_name ) )
+				return generated;
 
 			logging::console::print (xs ("[error] interface not found | {}:{}"), qualified.module, lookup_name);
 			return 0;
@@ -290,11 +330,22 @@ namespace memory {
 				continue;
 
 			const auto create_interface = get_module_export_with_base (module_base, xs ("CreateInterface"));
-			if (!create_interface)
-				continue;
+			if (!create_interface) {
+				if ( const auto generated = detail::get_generated_interface( module_base, module_name, lookup_name ) )
+					return generated;
 
-			const auto interface_list_offset = *reinterpret_cast<std::int32_t*>(create_interface + 3);
-			const auto interface_regs = *reinterpret_cast<interface_reg_t**>(create_interface + 7 + interface_list_offset);
+				continue;
+			}
+
+			const auto interface_list_offset = safe_read<std::int32_t>( create_interface + 3 );
+			if ( !interface_list_offset ) {
+				if ( const auto generated = detail::get_generated_interface( module_base, module_name, lookup_name ) )
+					return generated;
+
+				continue;
+			}
+
+			const auto interface_regs = safe_read<interface_reg_t*>( create_interface + 7 + *interface_list_offset ).value_or( nullptr );
 
 			for (auto current = interface_regs; current; current = current->next) {
 				if (!current->name || !current->create_fn)
@@ -303,6 +354,9 @@ namespace memory {
 				if (std::string_view (current->name) == lookup_name)
 					return current->create_fn ();
 			}
+
+			if ( const auto generated = detail::get_generated_interface( module_base, module_name, lookup_name ) )
+				return generated;
 		}
 
 		logging::console::print (xs ("[error] interface not found | {}"), lookup_name);
