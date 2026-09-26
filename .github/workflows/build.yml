@@ -37,13 +37,10 @@ jobs:
   build:
     name: ${{ matrix.configuration }} x64
     runs-on: windows-latest
-    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.configuration == 'all' || github.event.inputs.configuration == matrix.configuration }}
     strategy:
       fail-fast: false
       matrix:
-        configuration:
-          - Development
-          - Release
+        configuration: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.event.inputs.configuration != 'all' && format('["{0}"]', github.event.inputs.configuration) || '["Development","Release"]') }}
 
     steps:
       - name: Checkout
