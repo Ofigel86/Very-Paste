@@ -15,6 +15,10 @@ out/
 *.pdb
 *.ilk
 
+# Python helper cache
+__pycache__/
+*.py[cod]
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

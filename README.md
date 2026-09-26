@@ -41,6 +41,29 @@ You can force a custom raw base URL:
 python tools/update_offsets.py --base-url https://raw.githubusercontent.com/<owner>/<repo>/<branch>/output
 ```
 
+### Visual Studio/MSBuild integration
+
+The `.vcxproj` can run the updater before compilation. It is opt-in so normal builds do not require Python or network access.
+
+Enable it from Visual Studio/MSBuild by setting these properties:
+
+```powershell
+msbuild velocity-cs2/velocity-cs2.vcxproj /p:Configuration=Development /p:Platform=x64 /p:UpdateOffsetsOnBuild=true /p:Cs2DumperOutputDir=C:\path\to\cs2_dumper\output
+```
+
+You can also set the environment variable instead of the MSBuild property:
+
+```powershell
+$env:CS2_DUMPER_OUTPUT = "C:\path\to\cs2_dumper\output"
+msbuild velocity-cs2/velocity-cs2.vcxproj /p:Configuration=Development /p:Platform=x64 /p:UpdateOffsetsOnBuild=true
+```
+
+The project uses `py -3` by default. Override it if needed:
+
+```powershell
+msbuild velocity-cs2/velocity-cs2.vcxproj /p:UpdateOffsetsOnBuild=true /p:PythonExe=python /p:Cs2DumperOutputDir=C:\path\to\output
+```
+
 ### CI/check mode
 
 To fail when the checked-in generated header is stale:

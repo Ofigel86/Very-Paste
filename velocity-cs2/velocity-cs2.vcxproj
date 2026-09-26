@@ -46,6 +46,11 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <UpdateOffsetsOnBuild Condition="'$(UpdateOffsetsOnBuild)'==''">false</UpdateOffsetsOnBuild>
+    <Cs2DumperOutputDir Condition="'$(Cs2DumperOutputDir)'=='' and '$(CS2_DUMPER_OUTPUT)'!=''">$(CS2_DUMPER_OUTPUT)</Cs2DumperOutputDir>
+    <PythonExe Condition="'$(PythonExe)'==''">py -3</PythonExe>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Development|x64'">
     <OutDir>$(ProjectDir)..\bin\</OutDir>
     <IntDir>$(ProjectDir)..\bin\intermediates\</IntDir>
@@ -340,11 +345,17 @@
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />
+    <None Include="..\tools\update_offsets.py" />
     <None Include="project\external\inline-syscall\inline_syscall.inl" />
   </ItemGroup>
   <ItemGroup>
     <MASM Include="project\external\inline-syscall\syscall_impl.asm" />
   </ItemGroup>
+  <Target Name="UpdateCs2DumperOffsets" BeforeTargets="ClCompile" Condition="'$(UpdateOffsetsOnBuild)'=='true'">
+    <Error Condition="'$(Cs2DumperOutputDir)'==''" Text="Set Cs2DumperOutputDir or CS2_DUMPER_OUTPUT to a cs2_dumper output directory." />
+    <Message Importance="High" Text="Updating CS2 offsets from $(Cs2DumperOutputDir)" />
+    <Exec WorkingDirectory="$(ProjectDir).." Command="$(PythonExe) &quot;$(ProjectDir)..\tools\update_offsets.py&quot; --source-dir &quot;$(Cs2DumperOutputDir)&quot;" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
