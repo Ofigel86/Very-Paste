@@ -1785,21 +1785,30 @@ namespace features::combat {
 		}
 
 		math::vector3 forward{};
+		auto has_forward{ false };
+		if ( const auto angles = base->viewangles( ) )
 		{
-			if ( const auto angles = base->viewangles( ) )
-			{
-				math::helpers::angle_vectors_left( { angles->x( ), angles->y( ), angles->z( ) }, &forward );
-			}
+			math::helpers::angle_vectors_left( { angles->x( ), angles->y( ), angles->z( ) }, &forward );
+			has_forward = forward.length_sqr( ) > 0.0f;
 		}
 
 		const auto punched_aim = math::vector3{ aim_angle.x - aim_punch.x, aim_angle.y - aim_punch.y, 0.0f };
-		const auto facing_away = forward.dot( ( tgt.hit.record->origin - systems::g_prediction.pre( ).networked_origin ).normalized( ) ) < 0.707107f;
-
 		auto command_aim = punched_aim;
-		if ( facing_away && settings::g_combat.m_antiaim.hide_shots.value )
+
+		const auto target_delta = tgt.hit.record->origin - systems::g_prediction.pre( ).networked_origin;
+		const auto can_evaluate_hide_shots = settings::g_combat.m_antiaim.hide_shots.value &&
+			has_forward && target_delta.length_sqr( ) > 1.0f;
+
+		if ( can_evaluate_hide_shots )
 		{
-			command_aim.x = 179.9f;
-			command_aim.y = std::remainderf( punched_aim.y + 180.0f, 360.0f );
+			const auto target_dir = target_delta.normalized( );
+			const auto facing_away = forward.dot( target_dir ) < 0.707107f;
+
+			if ( facing_away )
+			{
+				command_aim.x = 179.9f;
+				command_aim.y = std::remainderf( punched_aim.y + 180.0f, 360.0f );
+			}
 		}
 
 		if ( const auto angles = base->mutable_viewangles( ) )
