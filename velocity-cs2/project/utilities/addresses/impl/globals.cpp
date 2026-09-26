@@ -22,8 +22,15 @@ namespace addresses::globals {
 			std::ptrdiff_t rva,
 			std::string_view name )
 		{
-			if ( const auto resolved = PATTERN( pattern ) )
-				return resolved;
+			// PATTERN(...) wraps its argument in a captureless lambda and therefore
+			// cannot be used with a runtime function parameter on MSVC. Resolve the
+			// pattern string directly here; this helper is called once during address
+			// initialization, so we do not need the macro's per-call-site static cache.
+			if ( pattern.data.data )
+			{
+				if ( const auto resolved = memory::resolve_pattern( pattern.data.data ) )
+					return resolved;
+			}
 
 			const auto fallback = rva_address( module_base, rva );
 			if ( fallback )
