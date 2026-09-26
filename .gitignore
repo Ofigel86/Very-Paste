@@ -1,0 +1,20 @@
+# Visual Studio / MSBuild output
+bin/
+build/
+out/
+.vs/
+*.user
+*.suo
+*.vcxproj.user
+*.filters
+*.log
+
+# Crash dumps and diagnostics
+*.dmp
+*.mdmp
+*.pdb
+*.ilk
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

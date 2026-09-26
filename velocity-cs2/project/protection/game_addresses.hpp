@@ -79,16 +79,24 @@ namespace protection::addresses {
 		return static_cast<std::uintptr_t>(e.encoded ^ e.key);
 	}
 
+#if ( defined( __clang__ ) || defined( __GNUC__ ) ) && !defined( _MSC_VER )
+#define VELOCITY_ADDRESS_ENTRY_ATTR [[gnu::section("_addr"), gnu::used, gnu::retain]]
+#else
+#define VELOCITY_ADDRESS_ENTRY_ATTR
+#endif
+
 	template <std::uint32_t Hash, address_type Type, fixed_string Str>
 	struct address_holder {
-		[[gnu::section("_addr"), gnu::used, gnu::retain]]
+		VELOCITY_ADDRESS_ENTRY_ATTR
 		inline static constexpr address_t entry {Type, Str.value};
 	};
 
 	struct sentinel_holder {
-		[[gnu::section("_addr"), gnu::used, gnu::retain]]
+		VELOCITY_ADDRESS_ENTRY_ATTR
 		inline static constexpr address_t entry {};
 	};
+
+#undef VELOCITY_ADDRESS_ENTRY_ATTR
 
 }
 
