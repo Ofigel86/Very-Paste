@@ -8,8 +8,32 @@
 #include <protection/game_addresses.hpp>
 namespace features::combat {
 
+	namespace {
+
+		template <typename T>
+		[[nodiscard]] T read_schema_or(
+			std::uintptr_t base,
+			int offset,
+			T fallback = {} )
+		{
+			if ( !base || offset <= 0 )
+			{
+				return fallback;
+			}
+
+			return memory::safe_read<T>( base + static_cast< std::uintptr_t >( offset ) )
+				.value_or( fallback );
+		}
+
+	} // namespace
+
 	void rage::on_create_move( systems::input::usercmd* cmd )
 	{
+		if ( !cmd )
+		{
+			return;
+		}
+
 		auto& ctx = g_shared.ctx( );
 		const auto local = systems::g_local.get( );
 		this->update_penetration_crosshair( local );
@@ -144,7 +168,10 @@ namespace features::combat {
 			{
 				g_shared.sh( ).snapshot( local.pawn, ctx.weapon_services );
 
-				out.velocity = memory::read<math::vector3>( local.pawn + SCHEMA( "C_BaseEntity", "m_vecAbsVelocity"_hash ) );
+				out.velocity = read_schema_or<math::vector3>(
+					local.pawn,
+					SCHEMA( "C_BaseEntity", "m_vecAbsVelocity"_hash ),
+					out.velocity );
 				out.spread = g_shared.get_spread( );
 				out.predicted_inaccuracy = g_shared.get_inaccuracy( true );
 			} );
@@ -176,13 +203,20 @@ namespace features::combat {
 		auto sim_vel = prestate.networked_velocity;
 		sim_vel.z = 0.0f;
 
-		const auto sv_friction = CONVAR("sv_friction")->get<float>( );
-		const auto sv_stopspeed = CONVAR("sv_stopspeed")->get<float>( );
-		const auto sv_accelerate = CONVAR("sv_accelerate")->get<float>( );
-		const auto surface_friction = prestate.surface_friction;
+		const auto sv_friction_cvar = CONVAR( "sv_friction" );
+		const auto sv_stopspeed_cvar = CONVAR( "sv_stopspeed" );
+		const auto sv_accelerate_cvar = CONVAR( "sv_accelerate" );
+		const auto sv_friction = sv_friction_cvar ? sv_friction_cvar->get<float>( ) : 5.2f;
+		const auto sv_stopspeed = sv_stopspeed_cvar ? sv_stopspeed_cvar->get<float>( ) : 80.0f;
+		const auto sv_accelerate = sv_accelerate_cvar ? sv_accelerate_cvar->get<float>( ) : 5.5f;
+		const auto surface_friction = prestate.surface_friction > 0.0f ? prestate.surface_friction : 1.0f;
 
-		const auto movement_services = memory::read<std::uintptr_t>( local.pawn + SCHEMA( "C_BasePlayerPawn", "m_pMovementServices"_hash ) );
-		const auto max_move_speed = movement_services ? memory::read<float>( movement_services + SCHEMA( "CPlayer_MovementServices", "m_flMaxspeed"_hash ) ) : 250.0f;
+		const auto movement_services = read_schema_or<std::uintptr_t>(
+			local.pawn,
+			SCHEMA( "C_BasePlayerPawn", "m_pMovementServices"_hash ) );
+		const auto max_move_speed = movement_services
+			? read_schema_or<float>( movement_services, SCHEMA( "CPlayer_MovementServices", "m_flMaxspeed"_hash ), 250.0f )
+			: 250.0f;
 
 		for ( auto i = 0; i < 15; ++i )
 		{
@@ -250,6 +284,18 @@ namespace features::combat {
 		const_cast<rage*>( this )->m_extrapolated_records.clear( );
 		const_cast<rage*>( this )->m_extrapolated_records.reserve( players.size( ) );
 
+		const auto pawn_alive_offset = SCHEMA( "CCSPlayerController", "m_bPawnIsAlive"_hash );
+		const auto pawn_handle_offset = SCHEMA( "CBasePlayerController", "m_hPawn"_hash );
+		const auto team_offset = SCHEMA( "C_BaseEntity", "m_iTeamNum"_hash );
+		const auto health_offset = SCHEMA( "C_BaseEntity", "m_iHealth"_hash );
+		const auto immunity_offset = SCHEMA( "C_CSPlayerPawn", "m_bGunGameImmunity"_hash );
+		const auto armor_offset = SCHEMA( "C_CSPlayerPawn", "m_ArmorValue"_hash );
+		if ( pawn_alive_offset <= 0 || pawn_handle_offset <= 0 || team_offset <= 0 ||
+			health_offset <= 0 || immunity_offset <= 0 || armor_offset <= 0 )
+		{
+			return out;
+		}
+
 		for ( const auto& p : players )
 		{
 			if ( !p.ptr || p.ptr == local.controller )
@@ -257,12 +303,12 @@ namespace features::combat {
 				continue;
 			}
 
-			if ( !memory::read<bool>( p.ptr + SCHEMA( "CCSPlayerController", "m_bPawnIsAlive"_hash ) ) )
+			if ( !read_schema_or<bool>( p.ptr, pawn_alive_offset ) )
 			{
 				continue;
 			}
 
-			const auto pawn_handle = memory::read<std::uint32_t>( p.ptr + SCHEMA( "CBasePlayerController", "m_hPawn"_hash ) );
+			const auto pawn_handle = read_schema_or<std::uint32_t>( p.ptr, pawn_handle_offset );
 			const auto pawn = systems::g_entities.lookup( pawn_handle );
 
 			if ( !pawn || pawn == local.pawn )
@@ -270,19 +316,19 @@ namespace features::combat {
 				continue;
 			}
 
-			const auto team = memory::read<int>( pawn + SCHEMA( "C_BaseEntity", "m_iTeamNum"_hash ) );
-			if ( !local.is_this_other_team( team ) )
+			const auto team = read_schema_or<int>( pawn, team_offset, -1 );
+			if ( team < 0 || !local.is_this_other_team( team ) )
 			{
 				continue;
 			}
 
-			const auto health = memory::read<int>( pawn + SCHEMA( "C_BaseEntity", "m_iHealth"_hash ) );
+			const auto health = read_schema_or<int>( pawn, health_offset );
 			if ( health <= 0 )
 			{
 				continue;
 			}
 
-			if ( memory::read<bool>( pawn + SCHEMA( "C_CSPlayerPawn", "m_bGunGameImmunity"_hash ) ) )
+			if ( read_schema_or<bool>( pawn, immunity_offset ) )
 			{
 				continue;
 			}
@@ -323,7 +369,7 @@ namespace features::combat {
 			candidate c{};
 			c.pawn = pawn;
 			c.health = health;
-			c.armor = memory::read<int>( pawn + SCHEMA( "C_CSPlayerPawn", "m_ArmorValue"_hash ) );
+			c.armor = read_schema_or<int>( pawn, armor_offset );
 
 			const auto pick_record_indices = [ &records ]( std::array<int, k_max_scan_records>& out_indices ) -> int
 				{
@@ -386,6 +432,11 @@ namespace features::combat {
 
 	void rage::run_gun( systems::input::usercmd* cmd, const aim_context& ctx, const systems::local::snapshot& local, bool allow_fire )
 	{
+		if ( !cmd || !local.pawn || !local.controller )
+		{
+			return;
+		}
+
 		if ( !settings::g_combat.m_ragebot.enabled )
 		{
 			return;
@@ -561,6 +612,11 @@ namespace features::combat {
 
 	void rage::run_taser( systems::input::usercmd* cmd, const aim_context& ctx, const systems::local::snapshot& local )
 	{
+		if ( !cmd || !local.pawn || !local.controller )
+		{
+			return;
+		}
+
 		if ( !settings::g_combat.m_zeusbot.enabled )
 		{
 			return;
@@ -620,6 +676,11 @@ namespace features::combat {
 
 	void rage::run_knife( systems::input::usercmd* cmd, const aim_context& ctx, const systems::local::snapshot& local )
 	{
+		if ( !cmd || !local.pawn || !local.controller )
+		{
+			return;
+		}
+
 		if ( !settings::g_combat.m_knifebot.enabled )
 		{
 			return;
@@ -692,6 +753,12 @@ namespace features::combat {
 
 	void rage::auto_revolver( systems::input::usercmd* cmd, const aim_context& ctx, const systems::local::snapshot& local )
 	{
+		if ( !cmd || !local.pawn || !local.controller )
+		{
+			this->m_revolver_cock_ticks = 0;
+			return;
+		}
+
 		if ( !settings::g_combat.m_ragebot.enabled )
 		{
 			this->m_revolver_cock_ticks = 0;
@@ -804,14 +871,25 @@ namespace features::combat {
 	std::vector<rage::scan_hit> rage::scan_player( const math::vector3& eye, float inaccuracy, const aim_context& ctx, candidate& cand, shared::lagcomp::record* record, const systems::local::snapshot& local ) const
 	{
 		// idk how this happens
-		if (!cand.pawn || cand.record_count <= 0 || cand.health <= 0)
+		if ( !cand.pawn || !record || !record->valid || cand.record_count <= 0 || cand.health <= 0 || !local.pawn )
 			return {};
 
 		const auto& shared_ctx = g_shared.ctx( );
 		const auto& config = settings::g_combat.m_ragebot.get_group( shared_ctx.weapon_type );
 
-		const auto game_scene_node = memory::read<std::uintptr_t>( cand.pawn + SCHEMA( "C_BaseEntity", "m_pGameSceneNode"_hash ) );
+		const auto game_scene_node = read_schema_or<std::uintptr_t>(
+			cand.pawn,
+			SCHEMA( "C_BaseEntity", "m_pGameSceneNode"_hash ) );
+		if ( !game_scene_node )
+		{
+			return {};
+		}
+
 		const auto hitbox_set = systems::g_hitboxes.query( game_scene_node );
+		if ( hitbox_set.count <= 0 )
+		{
+			return {};
+		}
 		const auto skeleton = g_shared.lc( ).get_skeleton( *record );
 		const auto pen_ctx = g_shared.pen( ).prepare_target( cand.pawn, record );
 
@@ -1243,7 +1321,10 @@ namespace features::combat {
 			return ctx.predicted_inaccuracy;
 		}
 
-		const auto inaccuracy_stand = memory::read<float>( shared_ctx.weapon_vdata + SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyStand"_hash ) );
+		const auto inaccuracy_stand = read_schema_or<float>(
+			shared_ctx.weapon_vdata,
+			SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyStand"_hash ),
+			ctx.predicted_inaccuracy );
 		return std::max( inaccuracy_stand, g_shared.get_inaccuracy_at_velocity( local.pawn, velocity ) );
 	}
 
@@ -1252,8 +1333,24 @@ namespace features::combat {
 		const auto& shared_ctx = g_shared.ctx( );
 		std::vector<scan_hit> results;
 
+		if ( shared_ctx.range <= 0.0f )
+		{
+			return results;
+		}
+
+		const auto scene_node_offset = SCHEMA( "C_BaseEntity", "m_pGameSceneNode"_hash );
+		if ( scene_node_offset <= 0 )
+		{
+			return results;
+		}
+
 		for ( auto& cand : candidates )
 		{
+			if ( !cand.pawn )
+			{
+				continue;
+			}
+
 			for ( auto ri = 0; ri < cand.record_count; ++ri )
 			{
 				auto* record = cand.records[ ri ];
@@ -1262,7 +1359,7 @@ namespace features::combat {
 					continue;
 				}
 
-				const auto game_scene_node = memory::read<std::uintptr_t>( cand.pawn + SCHEMA( "C_BaseEntity", "m_pGameSceneNode"_hash ) );
+				const auto game_scene_node = read_schema_or<std::uintptr_t>( cand.pawn, scene_node_offset );
 				if ( !game_scene_node )
 				{
 					continue;
@@ -1341,10 +1438,22 @@ namespace features::combat {
 	rage::knife_info rage::get_knife_info( const systems::local::snapshot& local ) const
 	{
 		const auto& shared_ctx = g_shared.ctx( );
-		const auto tick_base = memory::read<int>( local.controller + SCHEMA( "CBasePlayerController", "m_nTickBase"_hash ) );
-		const auto next_primary = memory::read<int>( shared_ctx.weapon + SCHEMA( "C_BasePlayerWeapon", "m_nNextPrimaryAttackTick"_hash ) );
-		const auto next_secondary = memory::read<int>( shared_ctx.weapon + SCHEMA( "C_BasePlayerWeapon", "m_nNextSecondaryAttackTick"_hash ) );
-		const auto last_shot_time = memory::read<float>( shared_ctx.weapon + SCHEMA( "C_CSWeaponBase", "m_fLastShotTime"_hash ) );
+		constexpr auto unavailable_tick{ 0x7fffffff };
+
+		const auto tick_base = read_schema_or<int>(
+			local.controller,
+			SCHEMA( "CBasePlayerController", "m_nTickBase"_hash ) );
+		const auto next_primary = read_schema_or<int>(
+			shared_ctx.weapon,
+			SCHEMA( "C_BasePlayerWeapon", "m_nNextPrimaryAttackTick"_hash ),
+			unavailable_tick );
+		const auto next_secondary = read_schema_or<int>(
+			shared_ctx.weapon,
+			SCHEMA( "C_BasePlayerWeapon", "m_nNextSecondaryAttackTick"_hash ),
+			unavailable_tick );
+		const auto last_shot_time = read_schema_or<float>(
+			shared_ctx.weapon,
+			SCHEMA( "C_CSWeaponBase", "m_fLastShotTime"_hash ) );
 		const auto cur_time = static_cast< float >( tick_base ) * cstypes::tick_interval;
 
 		return knife_info
@@ -1352,7 +1461,10 @@ namespace features::combat {
 			.can_slash = tick_base >= next_primary,
 			.can_stab = tick_base >= next_secondary,
 			.charged = ( cur_time - last_shot_time ) > 0.4f,
-			.armor_ratio = memory::read<float>( shared_ctx.weapon_vdata + SCHEMA( "CCSWeaponBaseVData", "m_flArmorRatio"_hash ) )
+			.armor_ratio = read_schema_or<float>(
+				shared_ctx.weapon_vdata,
+				SCHEMA( "CCSWeaponBaseVData", "m_flArmorRatio"_hash ),
+				1.0f )
 		};
 	}
 
@@ -1363,9 +1475,21 @@ namespace features::combat {
 
 		std::vector<scan_hit> results;
 
+		const auto eye_angles_offset = SCHEMA( "C_CSPlayerPawn", "m_angEyeAngles"_hash );
+		const auto scene_node_offset = SCHEMA( "C_BaseEntity", "m_pGameSceneNode"_hash );
+		if ( eye_angles_offset <= 0 || scene_node_offset <= 0 )
+		{
+			return results;
+		}
+
 		for ( auto& cand : candidates )
 		{
-			const auto eye_angles = memory::read<math::vector3>( cand.pawn + SCHEMA( "C_CSPlayerPawn", "m_angEyeAngles"_hash ) );
+			if ( !cand.pawn )
+			{
+				continue;
+			}
+
+			const auto eye_angles = read_schema_or<math::vector3>( cand.pawn, eye_angles_offset );
 			const auto hp = static_cast< float >( cand.health );
 
 			const auto frontal_slash_dmg = this->get_knife_damage( info.charged ? 40.0f : 25.0f, cand.armor, info.armor_ratio );
@@ -1380,7 +1504,7 @@ namespace features::combat {
 					continue;
 				}
 
-				const auto game_scene_node = memory::read<std::uintptr_t>( cand.pawn + SCHEMA( "C_BaseEntity", "m_pGameSceneNode"_hash ) );
+				const auto game_scene_node = read_schema_or<std::uintptr_t>( cand.pawn, scene_node_offset );
 				if ( !game_scene_node )
 				{
 					continue;
@@ -1519,16 +1643,24 @@ namespace features::combat {
 
 	void rage::fire_gun( systems::input::usercmd* cmd, const target& tgt, bool was_forced, const math::vector3& shoot_eye, const systems::local::snapshot& local )
 	{
-		if ( !tgt.hit.record || !tgt.hit.record->valid )
+		if ( !cmd || !local.controller || !local.pawn || !tgt.hit.record || !tgt.hit.record->valid )
+		{
+			return;
+		}
+
+		const auto base = cmd->csgo_user_cmd.mutable_base( );
+		if ( !base )
 		{
 			return;
 		}
 
 		this->m_firing_this_tick = true;
 
-		const auto base = cmd->csgo_user_cmd.mutable_base( );
-		const auto tick_base = memory::read<int>( local.controller + SCHEMA( "CBasePlayerController", "m_nTickBase"_hash ) );
 		const auto& shared_ctx = g_shared.ctx( );
+		const auto tick_base = read_schema_or<int>(
+			local.controller,
+			SCHEMA( "CBasePlayerController", "m_nTickBase"_hash ),
+			shared_ctx.current_tick );
 		const auto& config = settings::g_combat.m_ragebot.get_group( shared_ctx.weapon_type );
 		const auto aim_punch = g_shared.get_aim_punch( local.pawn );
 		auto aim_angle = config.no_spread.value ? math::helpers::calculate_angle( shoot_eye, tgt.hit.position ) : tgt.hit.aim_angle;
@@ -1684,15 +1816,23 @@ namespace features::combat {
 
 	void rage::fire_melee( systems::input::usercmd* cmd, const target& tgt, const systems::local::snapshot& local )
 	{
-		if ( !tgt.hit.record || !tgt.hit.record->valid )
+		if ( !cmd || !local.controller || !tgt.hit.record || !tgt.hit.record->valid )
+		{
+			return;
+		}
+
+		const auto base = cmd->csgo_user_cmd.mutable_base( );
+		if ( !base )
 		{
 			return;
 		}
 
 		this->m_firing_this_tick = true;
 
-		const auto base = cmd->csgo_user_cmd.mutable_base( );
-		const auto tick_base = memory::read<int>( local.controller + SCHEMA( "CBasePlayerController", "m_nTickBase"_hash ) );
+		const auto tick_base = read_schema_or<int>(
+			local.controller,
+			SCHEMA( "CBasePlayerController", "m_nTickBase"_hash ),
+			g_shared.ctx( ).current_tick );
 
 		g_shared.last_shoot_tick( ) = tick_base;
 
@@ -1931,6 +2071,11 @@ namespace features::combat {
 		const auto& prestate = systems::g_prediction.pre( );
 		const auto velocity = prestate.networked_velocity;
 
+		if ( !shared_ctx.weapon_vdata )
+		{
+			return false;
+		}
+
 		if ( shared_ctx.weapon_type == cstypes::weapon_type::sniper && !ctx.is_scoped )
 		{
 			return false;
@@ -1944,10 +2089,14 @@ namespace features::combat {
 				return false;
 			}
 
-			const auto inaccuracy_move = memory::read<float>( shared_ctx.weapon_vdata + SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyMove"_hash ) );
-			const auto inaccuracy_stand = memory::read<float>( shared_ctx.weapon_vdata + SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyStand"_hash ) );
+			const auto inaccuracy_move = read_schema_or<float>(
+				shared_ctx.weapon_vdata,
+				SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyMove"_hash ) );
+			const auto inaccuracy_stand = read_schema_or<float>(
+				shared_ctx.weapon_vdata,
+				SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyStand"_hash ) );
 
-			return speed_2d * inaccuracy_move > inaccuracy_stand;
+			return inaccuracy_move > 0.0f && inaccuracy_stand > 0.0f && speed_2d * inaccuracy_move > inaccuracy_stand;
 		}
 
 		if ( shared_ctx.weapon_type != cstypes::weapon_type::sniper )
@@ -1960,12 +2109,24 @@ namespace features::combat {
 			return false;
 		}
 
-		const auto sv_gravity = CONVAR ("sv_gravity")->get<float>( );
-		const auto sv_friction = CONVAR ("sv_friction")->get<float>( );
-		const auto sv_stopspeed = CONVAR ("sv_stopspeed")->get<float>( );
+		const auto sv_gravity_cvar = CONVAR( "sv_gravity" );
+		const auto sv_friction_cvar = CONVAR( "sv_friction" );
+		const auto sv_stopspeed_cvar = CONVAR( "sv_stopspeed" );
+		const auto sv_gravity = sv_gravity_cvar ? sv_gravity_cvar->get<float>( ) : 800.0f;
+		const auto sv_friction = sv_friction_cvar ? sv_friction_cvar->get<float>( ) : 5.2f;
+		const auto sv_stopspeed = sv_stopspeed_cvar ? sv_stopspeed_cvar->get<float>( ) : 80.0f;
 
-		const auto inac_jump_initial = memory::read<float>( shared_ctx.weapon_vdata + SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyJumpInitial"_hash ) );
-		const auto inac_jump_apex = memory::read<float>( shared_ctx.weapon_vdata + SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyJumpApex"_hash ) );
+		const auto inac_jump_initial = read_schema_or<float>(
+			shared_ctx.weapon_vdata,
+			SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyJumpInitial"_hash ) );
+		const auto inac_jump_apex = read_schema_or<float>(
+			shared_ctx.weapon_vdata,
+			SCHEMA( "CCSWeaponBaseVData", "m_flInaccuracyJumpApex"_hash ) );
+		if ( inac_jump_initial <= 0.0f || inac_jump_apex <= 0.0f )
+		{
+			return false;
+		}
+
 		const auto shootable_threshold = inac_jump_apex + 0.001f;
 		const auto early_threshold = inac_jump_initial * 0.55f + inac_jump_apex * 0.45f;
 		const auto air_inaccuracy = g_shared.get_air_inaccuracy( velocity.z, inac_jump_initial, inac_jump_apex );
@@ -1995,7 +2156,14 @@ namespace features::combat {
 		}
 
 		const auto speed_2d = velocity.length_2d( );
-		const auto max_speed = memory::read<float>( shared_ctx.weapon_vdata + SCHEMA( "CCSWeaponBaseVData", "m_flMaxSpeed"_hash ) );
+		const auto max_speed = read_schema_or<float>(
+			shared_ctx.weapon_vdata,
+			SCHEMA( "CCSWeaponBaseVData", "m_flMaxSpeed"_hash ) );
+		if ( max_speed <= 0.0f )
+		{
+			return false;
+		}
+
 		const auto accurate_threshold = max_speed * 0.34f;
 
 		if ( speed_2d <= accurate_threshold )
