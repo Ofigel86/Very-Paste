@@ -1,0 +1,90 @@
+name: Windows build
+
+on:
+  push:
+    branches:
+      - main
+      - arena/**
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Configuration to build
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - Development
+          - Release
+      platform_toolset:
+        description: MSVC PlatformToolset override for GitHub-hosted runners
+        required: true
+        default: v143
+        type: choice
+        options:
+          - v143
+          - v145
+
+env:
+  PROJECT_FILE: velocity-cs2/velocity-cs2.vcxproj
+  PLATFORM: x64
+  PLATFORM_TOOLSET: ${{ github.event.inputs.platform_toolset || 'v143' }}
+
+jobs:
+  build:
+    name: ${{ matrix.configuration }} x64
+    runs-on: windows-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.configuration == 'all' || github.event.inputs.configuration == matrix.configuration }}
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration:
+          - Development
+          - Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Show tool versions
+        shell: pwsh
+        run: |
+          msbuild -version
+          python --version
+
+      - name: Validate offset updater syntax
+        shell: pwsh
+        run: python -m py_compile tools/update_offsets.py
+
+      - name: Build ${{ matrix.configuration }}
+        shell: pwsh
+        run: |
+          msbuild "${{ env.PROJECT_FILE }}" `
+            /m `
+            /p:Configuration=${{ matrix.configuration }} `
+            /p:Platform=${{ env.PLATFORM }} `
+            /p:PlatformToolset=${{ env.PLATFORM_TOOLSET }} `
+            /p:UpdateOffsetsOnBuild=false `
+            /p:PreferredToolArchitecture=x64 `
+            /v:minimal
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-${{ matrix.configuration }}-${{ env.PLATFORM }}
+          path: |
+            bin/**/*.dll
+            bin/**/*.pdb
+          if-no-files-found: warn
